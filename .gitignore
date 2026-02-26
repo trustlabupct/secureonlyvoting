@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build output
+backend/dist/
+frontend/.next/
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+*.tsbuildinfo
+
+# Logs and runtime artifacts
+*.log
+server.log
+cookies*.txt
+directory-tree.txt
+backend/directory-tree.txt
+
+# Local environment files
+.env
+.env.*
+backend/.env
+backend/.env.test
+frontend/.env.local
+!**/.env.example
+!**/.env.*.example
+!**/.env.local.example
+
+# Temporary archives
+*.zip
+
+# OS/editor
+.DS_Store

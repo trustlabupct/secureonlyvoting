@@ -1,0 +1,38 @@
+{
+  "name": "voting_system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure voting system monorepo (NestJS backend + Next.js frontend).",
+  "main": "index.js",
+  "scripts": {
+    "test": "pnpm run test:backend && pnpm run test:frontend",
+    "test:backend": "cd backend && pnpm exec jest --runInBand",
+    "test:frontend": "cd frontend && pnpm exec jest --runInBand",
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "cd backend && pnpm run start:dev",
+    "dev:frontend": "cd frontend && pnpm run dev",
+    "build": "concurrently \"npm:build:backend\" \"npm:build:frontend\"",
+    "build:backend": "cd backend && pnpm run build",
+    "build:frontend": "cd frontend && pnpm run build",
+    "start": "concurrently \"npm:start:backend\" \"npm:start:frontend\"",
+    "start:backend": "cd backend && pnpm run start:prod",
+    "start:frontend": "cd frontend && pnpm run start"
+  },
+  "keywords": [],
+  "author": "Volodymyr Dubetskyy",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.15.4",
+    "@types/uuid": "^9.0.0",
+    "concurrently": "^9.1.2",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "pg": "^8.16.3",
+    "speakeasy": "^2.0.0",
+    "uuid": "^9.0.1"
+  }
+}

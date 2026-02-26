@@ -1,0 +1,207 @@
+name: TRUSTLab Security Health Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run health checks daily at 6 AM UTC
+    - cron: '0 6 * * *'
+
+env:
+  NODE_VERSION: '18'
+  POSTGRES_VERSION: '14'
+  DB_HOST: localhost
+  DB_PORT: 5432
+  DB_NAME: voting_system_test
+  DB_USER: postgres
+  DB_PASSWORD: test_password
+
+jobs:
+  security-health-check:
+    name: Security System Health Check
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: ${{ env.DB_NAME }}
+          POSTGRES_USER: ${{ env.DB_USER }}
+          POSTGRES_PASSWORD: ${{ env.DB_PASSWORD }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pnpm install
+
+      - name: Setup PostgreSQL extensions
+        run: |
+          # Install postgresql-contrib for pg_stat_statements
+          sudo apt-get update
+          sudo apt-get install -y postgresql-contrib-14
+          
+          # Configure PostgreSQL for pg_stat_statements
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
+          "
+          
+          # Restart PostgreSQL to load extensions
+          sudo systemctl restart postgresql
+          
+          # Wait for PostgreSQL to be ready
+          sleep 5
+          
+          # Enable pg_stat_statements extension
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+          "
+
+      - name: Run database migrations
+        run: |
+          cd backend
+          pnpm migration:run
+        env:
+          DATABASE_URL: postgresql://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.DB_HOST }}:${{ env.DB_PORT }}/${{ env.DB_NAME }}
+
+      - name: Verify migration and seeding
+        run: |
+          cd backend
+          # Check that rate_limit_policies table exists and has data
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            SELECT COUNT(*) as policy_count FROM rate_limit_policies;
+            SELECT endpoint, \"maxAttempts\", \"windowMs\" FROM rate_limit_policies LIMIT 5;
+          "
+
+      - name: Start backend application
+        run: |
+          cd backend
+          pnpm start:prod &
+          echo $! > backend.pid
+          
+          # Wait for application to start
+          sleep 10
+        env:
+          DATABASE_URL: postgresql://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.DB_HOST }}:${{ env.DB_PORT }}/${{ env.DB_NAME }}
+          NODE_ENV: production
+
+      - name: Wait for application readiness
+        run: |
+          # Wait up to 60 seconds for the application to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:3001/admin/security/health/public; do sleep 2; done'
+
+      - name: Run CI health checks
+        run: |
+          cd backend
+          pnpm ci:health-check
+        env:
+          CI_HOST: localhost
+          CI_PORT: 3001
+          CI_TIMEOUT: 30000
+          CI_MAX_RETRIES: 3
+
+      - name: Test enhanced security features
+        run: |
+          cd backend
+          pnpm test:enhanced-security
+        env:
+          DATABASE_URL: postgresql://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.DB_HOST }}:${{ env.DB_PORT }}/${{ env.DB_NAME }}
+
+      - name: Verify pg_stat_statements functionality
+        run: |
+          cd backend
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            SELECT 
+              COUNT(*) as tracked_queries,
+              COUNT(DISTINCT query) as unique_queries
+            FROM pg_stat_statements;
+            
+            SELECT 
+              LEFT(query, 50) as query_preview,
+              calls,
+              ROUND(mean_exec_time::numeric, 2) as avg_time_ms
+            FROM pg_stat_statements 
+            WHERE query LIKE '%rate_limit%'
+            ORDER BY calls DESC
+            LIMIT 5;
+          "
+
+      - name: Performance validation
+        run: |
+          cd backend
+          # Test that rate limiting performance meets requirements (<10ms average)
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            SELECT 
+              query,
+              calls,
+              mean_exec_time,
+              CASE 
+                WHEN mean_exec_time > 10 THEN 'SLOW'
+                ELSE 'OK'
+              END as performance_status
+            FROM pg_stat_statements 
+            WHERE query LIKE '%rate_limit%' 
+              AND calls > 5
+            ORDER BY mean_exec_time DESC;
+          "
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Stop backend application
+          if [ -f backend/backend.pid ]; then
+            kill $(cat backend/backend.pid) || true
+            rm backend/backend.pid
+          fi
+          
+          # Clean up test data
+          sudo -u postgres psql -d ${{ env.DB_NAME }} -c "
+            TRUNCATE TABLE rate_limits, app_metrics CASCADE;
+          " || true
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: |
+            backend/logs/
+            /var/log/postgresql/
+          retention-days: 7
+
+  notify-on-failure:
+    name: Notify on Health Check Failure
+    runs-on: ubuntu-latest
+    needs: security-health-check
+    if: failure() && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Notify team
+        run: |
+          echo "🚨 Security health check failed on main branch!"
+          echo "This indicates a critical issue with the security system."
+          echo "Please investigate immediately."
+          # Add your notification logic here (Slack, email, etc.) 
