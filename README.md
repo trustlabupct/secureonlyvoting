@@ -6,8 +6,7 @@ Monorepo for a secure voting platform:
 
 ## Authorship And Credit
 
-This entire project was created and authored by **Volodymyr Dubetskyy**.  
-All project credit for the architecture, implementation, and product direction belongs to **Volodymyr Dubetskyy**.
+This entire project was created and authored by **TRUST Lab UPCT**.  
 
 ## Tech Stack
 
